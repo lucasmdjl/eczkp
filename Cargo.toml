@@ -1,0 +1,18 @@
+[package]
+name = "eczkp"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "A library for Zero Knowledge Proof protocols using elliptic curves"
+repository = "https://github.com/lucasmdjl/eczkp"
+keywords = ["eczkp", "zero-knowledge", "proof", "elliptic", "curve"]
+categories = ["cryptography"]
+
+[dependencies]
+elliptic-curve = { version = "0.13.8", features = ["sec1"] }
+zeroize = { version = "1.8.1" }
+
+[dev-dependencies]
+rand = "0.8.5"
+hex = "0.4.3"
+p256 = "0.13.2"
