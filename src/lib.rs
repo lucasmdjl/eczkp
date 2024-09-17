@@ -19,9 +19,9 @@
 
 //! # eczkp - A Library for Zero Knowledge Proofs using Elliptic Curves
 //!
-//! `eczkp` is a cryptographic library for creating and verifying zero-knowledge proofs 
-//! based on elliptic curves. This library implements a simple protocol that allows one 
-//! party (the prover) to prove knowledge of a secret without revealing it, while the 
+//! `eczkp` is a cryptographic library for creating and verifying zero-knowledge proofs
+//! based on elliptic curves. This library implements a simple protocol that allows one
+//! party (the prover) to prove knowledge of a secret without revealing it, while the
 //! other party (the verifier) verifies the proof without learning the secret.
 //!
 //! ## Features
@@ -34,25 +34,25 @@
 //! Here is a simple example of how to use `eczkp` to perform a zero-knowledge proof with the Schnorr protocol:
 //!
 //! ```rust
-//! use eczkp::schnorr::{Prover, Verifier, Nonce, Challenge};
+//! use eczkp::schnorr::ec::{SchnorrECProver, SchnorrECVerifier};
+//! use eczkp::schnorr::traits::{Prover, Verifier};
 //! use elliptic_curve::SecretKey;
 //! use rand::rngs::OsRng;
 //! use p256::NistP256;
 //!
-//! // Generate a new secret key and public key for the prover
+//! // Generate a new secret key and public key
 //! let secret_key = SecretKey::<NistP256>::random(&mut OsRng);
 //! let public_key = secret_key.public_key();
 //!
-//! // Prover creates a nonce and commitment
-//! let nonce = Nonce::random(&mut OsRng);
-//! let prover = Prover::new(secret_key, nonce);
+//! // Prover creates a commitment
+//! let prover = SchnorrECProver::new(&secret_key, &mut OsRng);
 //! let commitment = prover.commitment();
 //!
 //! // Verifier generates a random challenge
-//! let challenge = Challenge::random(&mut OsRng);
-//! let verifier = Verifier::new(public_key, commitment, challenge);
+//! let verifier = SchnorrECVerifier::new(&public_key, commitment, &mut OsRng);
+//! let challenge = verifier.challenge();
 //!
-//! // Prover computes the answer based on the challenge
+//! // Prover answers the challenge
 //! let answer = prover.answer(challenge);
 //!
 //! // Verifier verifies the proof
@@ -62,9 +62,12 @@
 //! ## Crate Dependencies
 //! - `elliptic_curve`: Provides elliptic curve operations, used for cryptographic operations.
 //! - `zeroize`: Ensures sensitive data such as secrets are wiped from memory after use.
+//! - `rand_core`: Provides traits for secure random number generation.
 //!
 //! ## License
 //! This library is licensed under the GNU General Public License v3.0.
 
+/// Module for error types.
+pub mod error;
 /// Module for the Schnorr ZKP protocol.
 pub mod schnorr;

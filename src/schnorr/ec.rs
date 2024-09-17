@@ -16,7 +16,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-
+use crate::error::VerificationFailure;
+use crate::schnorr::traits::{Prover, Randomized, Verifier};
 use elliptic_curve::group::Curve;
 use elliptic_curve::ops::MulByGenerator;
 use elliptic_curve::point::PointCompression;
@@ -26,14 +27,14 @@ use elliptic_curve::{
     CurveArithmetic, Error, FieldBytes, FieldBytesSize, NonZeroScalar, PrimeCurve, PrimeField,
     PublicKey, ScalarPrimitive, SecretKey,
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Struct responsible for generating zero-knowledge proofs
 /// in the protocol.
 ///
 /// # Type Parameters
 /// - `C`: The elliptic curve used in the protocol.
-pub struct Prover<C>
+pub struct SchnorrECProver<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
@@ -43,48 +44,35 @@ where
     nonce: NonZeroScalar<C>,
 }
 
-impl<C> Prover<C>
+impl<C> Prover for SchnorrECProver<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
     C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
 {
-    /// Creates a new prover instance with the given `secret_key` and `nonce`.
-    ///
-    /// # Arguments
-    /// - `secret_key`: The secret key of the prover.
-    /// - `nonce`: A nonce for the proof.
-    ///
-    /// # Returns
-    /// A new `Prover` instance.
-    pub fn new(secret_key: SecretKey<C>, nonce: Nonce<C>) -> Self {
-        Prover {
+    type SecretKey = SecretKey<C>;
+    type Commitment = Commitment<C>;
+    type Nonce = Nonce<C>;
+    type Challenge = Challenge<C>;
+    type Answer = Answer<C>;
+    fn new_with_nonce(secret_key: &Self::SecretKey, nonce: Self::Nonce) -> Self {
+        SchnorrECProver {
             secret: secret_key.into(),
             nonce: nonce.into(),
         }
     }
-
-    /// Computes the prover's commitment, to be sent to the verifier.
-    ///
-    /// # Returns
-    /// A `Commitment` containing the affine point corresponding to the prover's nonce.
-    pub fn commitment(&self) -> Commitment<C> {
+    fn nonce(&self) -> Self::Nonce {
+        self.nonce.into()
+    }
+    fn commitment(&self) -> Self::Commitment {
         Commitment::new(C::ProjectivePoint::mul_by_generator(&self.nonce).to_affine())
     }
-
-    /// Computes the answer to a given challenge in the proof protocol.
-    ///
-    /// # Arguments
-    /// - `challenge`: A challenge from the verifier.
-    ///
-    /// # Returns
-    /// An `Answer` to the challenge.
-    pub fn answer(self, challenge: Challenge<C>) -> Answer<C> {
+    fn answer(self, challenge: Self::Challenge) -> Self::Answer {
         Answer::new(*self.nonce + *challenge.as_scalar() * *self.secret)
     }
 }
 
-impl<C> Zeroize for Prover<C>
+impl<C> Zeroize for SchnorrECProver<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
@@ -96,7 +84,7 @@ where
     }
 }
 
-impl<C> Drop for Prover<C>
+impl<C> Drop for SchnorrECProver<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
@@ -107,12 +95,20 @@ where
     }
 }
 
+impl<C> ZeroizeOnDrop for SchnorrECProver<C>
+where
+    C: CurveArithmetic + PrimeCurve,
+    FieldBytesSize<C>: ModulusSize,
+    C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
+{
+}
+
 /// Struct responsible for verifying zero-knowledge proofs
 /// in the protocol.
 ///
 /// # Type Parameters
 /// - `C`: The elliptic curve used in the protocol.
-pub struct Verifier<C>
+pub struct SchnorrECVerifier<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
@@ -123,48 +119,37 @@ where
     challenge: Challenge<C>,
 }
 
-impl<C> Verifier<C>
+impl<C> Verifier for SchnorrECVerifier<C>
 where
     C: CurveArithmetic + PrimeCurve,
     FieldBytesSize<C>: ModulusSize,
     C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
 {
-    /// Creates a new verifier with the given `public_key`, `commitment`, and `challenge`.
-    ///
-    /// # Arguments
-    /// - `public_key`: The prover's public key.
-    /// - `commitment`: The commitment sent by the prover.
-    /// - `challenge`: A challenge to be used for the proof.
-    ///
-    /// # Returns
-    /// A new `Verifier` instance.
-    pub fn new(public_key: PublicKey<C>, commitment: Commitment<C>, challenge: Challenge<C>) -> Self {
-        Verifier {
+    type PublicKey = PublicKey<C>;
+    type Commitment = Commitment<C>;
+    type Challenge = Challenge<C>;
+    type Answer = Answer<C>;
+    fn new_with_challenge(
+        public_key: &Self::PublicKey,
+        commitment: Self::Commitment,
+        challenge: Self::Challenge,
+    ) -> Self {
+        SchnorrECVerifier {
             public_key: public_key.to_projective(),
             commitment: commitment.to_affine().into(),
             challenge,
         }
     }
-
-    /// Returns the challenge used by the verifier.
-    pub fn challenge(&self) -> Challenge<C> {
+    fn challenge(&self) -> Self::Challenge {
         self.challenge
     }
-    
-    /// Verifies the proof by comparing the prover's answer with the expected result.
-    ///
-    /// # Arguments
-    /// - `answer`: The answer provided by the prover.
-    ///
-    /// # Returns
-    /// `Ok` if the answer is valid, `Err` otherwise.
-    pub fn verify(self, answer: Answer<C>) -> Result<(), Error> {
+    fn verify(self, answer: Self::Answer) -> Result<(), VerificationFailure> {
         let point1 = self.commitment + self.public_key * self.challenge.as_scalar();
         let point2 = C::ProjectivePoint::mul_by_generator(answer.as_scalar());
         if point1 == point2 {
             Ok(())
         } else {
-            Err(Error)
+            Err(VerificationFailure)
         }
     }
 }
@@ -195,17 +180,6 @@ where
     pub fn new(scalar: NonZeroScalar<C>) -> Self {
         Self { scalar }
     }
-    
-    /// Generates a random `Nonce` using the given cryptographic random number generator.
-    ///
-    /// # Arguments
-    /// - `rng`: A cryptographic random number generator.
-    ///
-    /// # Returns
-    /// A randomly generated `Nonce`.
-    pub fn random(rng: &mut impl CryptoRngCore) -> Self {
-        Self::new(NonZeroScalar::random(rng))
-    }
 
     /// Converts the nonce into a non-zero scalar value.
     ///
@@ -213,6 +187,17 @@ where
     /// The corresponding `NonZeroScalar`.
     pub fn to_nonzero_scalar(&self) -> NonZeroScalar<C> {
         self.scalar
+    }
+}
+
+impl<C> Randomized for Nonce<C>
+where
+    C: CurveArithmetic + PrimeCurve,
+    FieldBytesSize<C>: ModulusSize,
+    C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
+{
+    fn random(rng: &mut impl CryptoRngCore) -> Self {
+        Self::new(NonZeroScalar::random(rng))
     }
 }
 
@@ -307,8 +292,7 @@ where
     /// # Returns
     /// A `Result` containing a `Commitment` or an `Error` if parsing fails.
     pub fn from_encoded_point(encoded_point: &EncodedPoint<C>) -> Result<Self, Error> {
-        Option::from(C::AffinePoint::from_encoded_point(encoded_point).map(Self::new))
-            .ok_or(Error)
+        Option::from(C::AffinePoint::from_encoded_point(encoded_point).map(Self::new)).ok_or(Error)
     }
 
     /// Returns the affine point associated with the commitment.
@@ -360,20 +344,6 @@ where
     FieldBytesSize<C>: ModulusSize,
     C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
 {
-    /// Generates a random challenge using the given cryptographic random number generator.
-    ///
-    /// # Arguments
-    /// - `rng`: A cryptographic random number generator.
-    ///
-    /// # Returns
-    /// A new `Challenge` instance.
-    pub fn random(rng: &mut impl CryptoRngCore) -> Self {
-        Self {
-            // We use a random non-zero scalar because the zero scalar would allow any prover to submit a valid answer.
-            scalar: ScalarPrimitive::from(NonZeroScalar::<C>::random(rng)).into(),
-        }
-    }
-
     /// Decodes a `Challenge` from raw field bytes.
     ///
     /// # Arguments
@@ -412,6 +382,20 @@ where
     /// The challenge represented as field bytes.
     pub fn to_bytes(&self) -> FieldBytes<C> {
         self.scalar.to_repr()
+    }
+}
+
+impl<C> Randomized for Challenge<C>
+where
+    C: CurveArithmetic + PrimeCurve,
+    FieldBytesSize<C>: ModulusSize,
+    C::AffinePoint: FromEncodedPoint<C> + ToEncodedPoint<C>,
+{
+    fn random(rng: &mut impl CryptoRngCore) -> Self {
+        Self {
+            // We use a random non-zero scalar because the zero scalar would allow any prover to submit a valid answer.
+            scalar: ScalarPrimitive::from(NonZeroScalar::<C>::random(rng)).into(),
+        }
     }
 }
 
@@ -489,9 +473,9 @@ where
 mod tests {
     use super::*;
     use p256::NistP256;
+    use rand::rngs::OsRng;
     use std::sync::mpsc::channel;
     use std::thread;
-    use rand::rngs::OsRng;
 
     #[test]
     fn it_works() {
@@ -504,8 +488,7 @@ mod tests {
         let (server_sender, client_receiver) = channel::<String>();
 
         let client_thread = thread::spawn(move || {
-            let nonce = Nonce::random(&mut OsRng);
-            let prover = Prover::new(secret_key, nonce);
+            let prover = SchnorrECProver::new(&secret_key, &mut OsRng);
             let commitment = prover.commitment();
             let commitment = hex::encode(commitment.to_sec1_bytes());
             client_sender.send(commitment).unwrap();
@@ -519,10 +502,10 @@ mod tests {
         let server_thread = thread::spawn(move || {
             let commitment = server_receiver.recv().unwrap();
             let commitment = hex::decode(commitment).unwrap();
-            let verifier = Verifier::new(
-                public_key,
+            let verifier = SchnorrECVerifier::new(
+                &public_key,
                 Commitment::from_sec1_bytes(&commitment).unwrap(),
-                Challenge::random(&mut OsRng),
+                &mut OsRng,
             );
             let challenge = verifier.challenge();
             let challenge = hex::encode(challenge.to_bytes());
